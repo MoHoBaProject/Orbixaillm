@@ -1,0 +1,18 @@
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: Tahoma, "Segoe UI", sans-serif;
+  background: #0f1720;
+  color: #e8edf2;
+}
+.wrap { max-width: 680px; margin: 0 auto; padding: 20px 16px; min-height: 100vh; display: flex; flex-direction: column; }
+h1 { font-size: 20px; margin: 0 0 16px; }
+.msgs { flex: 1; display: flex; flex-direction: column; gap: 10px; padding-bottom: 16px; }
+.msg { padding: 10px 14px; border-radius: 12px; line-height: 1.9; white-space: pre-wrap; max-width: 90%; }
+.user { background: #1f6f5c; align-self: flex-start; }
+.bot { background: #1b2733; align-self: flex-end; }
+.row { display: flex; gap: 8px; position: sticky; bottom: 0; background: #0f1720; padding: 10px 0; }
+input { flex: 1; padding: 12px; border-radius: 10px; border: 1px solid #2c3b4a; background: #16212c; color: inherit; font-size: 16px; }
+input:focus-visible, button:focus-visible { outline: 2px solid #4fd1b0; }
+button { padding: 0 20px; border: 0; border-radius: 10px; background: #4fd1b0; color: #06201a; font-size: 16px; cursor: pointer; }
+button:disabled { opacity: .5; cursor: default; }
