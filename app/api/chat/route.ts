@@ -1,8 +1,8 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 
 // مدل سبک برای سوال‌های کوتاه، مدل قوی‌تر برای بقیه
-const MODEL_LIGHT = "@cf/meta/llama-3.1-8b-instruct";
-const MODEL_MAIN = "@cf/google/gemma-3-12b-it";
+const MODEL_LIGHT = "@cf/meta/llama-3.1-8b-instruct-fp8";
+const MODEL_MAIN = "@cf/google/gemma-4-26b-a4b-it";
 const SHORT_LIMIT = 40; // طول پیام (کاراکتر) برای انتخاب مدل سبک
 const MAX_TOKENS = 256;
 const CACHE_TTL = 86400; // یک روز
