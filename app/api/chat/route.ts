@@ -50,7 +50,7 @@ export async function POST(req: Request) {
       await e.CACHE.put(key, reply, { expirationTtl: CACHE_TTL });
     }
     return Response.json({ reply });
-  } catch {
-    return Response.json({ error: "خطا در پاسخ‌دهی هوش مصنوعی" }, { status: 500 });
+  } catch (err) {
+    return Response.json({ error: "خطا: " + String(err) }, { status: 500 });
   }
 }
