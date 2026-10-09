@@ -1,4 +1,19 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
+import { DOCS, VERSION } from "../../knowledge.generated";
+
+const norm = (s: string) =>
+  s.toLowerCase().replace(/ي/g, "ی").replace(/ك/g, "ک").replace(/\u200c/g, " ");
+
+// فقط فایل‌هایی که کلمه کلیدیشون تو پیام هست (حداکثر ۲ تا)
+function findDocs(msg: string) {
+  const m = norm(msg);
+  return DOCS.map((d) => ({ d, s: d.keywords.filter((k) => m.includes(norm(k))).length }))
+    .filter((x) => x.s > 0)
+    .sort((a, b) => b.s - a.s)
+    .slice(0, 2)
+    .map((x) => x.d.text)
+    .join("\n---\n");
+}
 
 // مدل سبک برای سوال‌های کوتاه، مدل قوی‌تر برای بقیه
 const MODEL_LIGHT = "@cf/meta/llama-3.1-8b-instruct-fp8";
@@ -45,7 +60,8 @@ export async function POST(req: Request) {
     const e = env as unknown as { AI: AiBinding; CACHE?: KvBinding };
 
     const model = message.length <= SHORT_LIMIT ? MODEL_LIGHT : MODEL_MAIN;
-    const key = "chat:" + (await hash(model + "|" + message.toLowerCase()));
+    const context = findDocs(message);
+    const key = "chat:" + (await hash(model + "|" + VERSION + "|" + message.toLowerCase()));
 
     // کش (فقط اگه KV وصل شده باشه)
     if (e.CACHE) {
@@ -55,7 +71,12 @@ export async function POST(req: Request) {
 
     const result = await e.AI.run(model, {
       messages: [
-        { role: "system", content: "Answer in Persian, briefly." },
+        {
+          role: "system",
+          content: context
+            ? "Reply in the same language as the user's message, briefly. Use ONLY this app info; if the answer is not in it, say you don't know.\n\n" + context
+            : "Reply in the same language as the user's message, briefly.",
+        },
         { role: "user", content: message },
       ],
       max_tokens: MAX_TOKENS,
