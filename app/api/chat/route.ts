@@ -7,6 +7,18 @@ const SHORT_LIMIT = 40; // طول پیام (کاراکتر) برای انتخا�
 const MAX_TOKENS = 256;
 const CACHE_TTL = 86400; // یک روز
 
+// CORS: بدون این هدرها مرورگر جواب این پروژه رو برای فرانت (دامنه‌ی دیگه) بلاک می‌کنه
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+  "Access-Control-Max-Age": "86400",
+};
+
+function reply(body: unknown, status = 200) {
+  return Response.json(body, { status, headers: CORS_HEADERS });
+}
+
 type AiBinding = { run: (model: string, input: unknown) => Promise<any> };
 type KvBinding = {
   get: (key: string) => Promise<string | null>;
@@ -18,11 +30,16 @@ async function hash(text: string) {
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+// درخواست preflight مرورگر
+export async function OPTIONS() {
+  return new Response(null, { status: 204, headers: CORS_HEADERS });
+}
+
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as { message?: string };
     const message = (body.message ?? "").trim().slice(0, 1000);
-    if (!message) return Response.json({ error: "پیام خالیه" }, { status: 400 });
+    if (!message) return reply({ error: "پیام خالیه" }, 400);
 
     const { env } = getCloudflareContext();
     const e = env as unknown as { AI: AiBinding; CACHE?: KvBinding };
@@ -33,7 +50,7 @@ export async function POST(req: Request) {
     // کش (فقط اگه KV وصل شده باشه)
     if (e.CACHE) {
       const hit = await e.CACHE.get(key);
-      if (hit) return Response.json({ reply: hit, cached: true });
+      if (hit) return reply({ reply: hit, cached: true });
     }
 
     const result = await e.AI.run(model, {
@@ -44,13 +61,13 @@ export async function POST(req: Request) {
       max_tokens: MAX_TOKENS,
     });
 
-    const reply = result?.response ?? result?.choices?.[0]?.message?.content ?? "";
+    const text = result?.response ?? result?.choices?.[0]?.message?.content ?? "";
 
-    if (e.CACHE && reply) {
-      await e.CACHE.put(key, reply, { expirationTtl: CACHE_TTL });
+    if (e.CACHE && text) {
+      await e.CACHE.put(key, text, { expirationTtl: CACHE_TTL });
     }
-    return Response.json({ reply });
+    return reply({ reply: text });
   } catch (err) {
-    return Response.json({ error: "خطا: " + String(err) }, { status: 500 });
+    return reply({ error: "خطا: " + String(err) }, 500);
   }
 }
