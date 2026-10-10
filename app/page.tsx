@@ -1,7 +1,10 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
-type Msg = { role: "user" | "bot"; text: string };
+type Msg = { role: "user" | "bot"; text: string; meta?: string };
+
+// فقط با ?debug=1 دیده می‌شه: انتخاب مدل برای مقایسه‌ی سرعت و کیفیت
+const MODEL_OPTIONS = ["gemma", "llama8", "qwen", "glm", "glm53", "llama70"];
 
 // بلوک کد (همیشه چپ‌به‌راست) با دکمه‌ی کپی
 function CodeBlock({ lang, code }: { lang: string; code: string }) {
@@ -62,6 +65,11 @@ export default function Home() {
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [debug, setDebug] = useState(false);
+  const [model, setModel] = useState("gemma");
+  useEffect(() => {
+    setDebug(new URLSearchParams(location.search).has("debug"));
+  }, []);
 
   async function send() {
     const text = input.trim();
@@ -69,14 +77,19 @@ export default function Home() {
     setMsgs((m) => [...m, { role: "user", text }]);
     setInput("");
     setLoading(true);
+    const t0 = Date.now();
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text }),
+        body: JSON.stringify(debug ? { message: text, model } : { message: text }),
       });
-      const data = (await res.json()) as { reply?: string; error?: string };
-      setMsgs((m) => [...m, { role: "bot", text: data.reply || data.error || "خطا" }]);
+      const data = (await res.json()) as { reply?: string; error?: string; model?: string; ms?: number; cached?: boolean };
+      const total = ((Date.now() - t0) / 1000).toFixed(1);
+      const meta = debug
+        ? `${data.model ?? "—"} · مدل: ${data.ms ? (data.ms / 1000).toFixed(1) + "s" : data.cached ? "کش" : "بدون مدل"} · کل: ${total}s`
+        : undefined;
+      setMsgs((m) => [...m, { role: "bot", text: data.reply || data.error || "خطا", meta }]);
     } catch {
       setMsgs((m) => [...m, { role: "bot", text: "اتصال برقرار نشد. دوباره تلاش کن." }]);
     }
@@ -91,10 +104,18 @@ export default function Home() {
         {msgs.map((m, i) => (
           <div key={i} className={`msg ${m.role}`}>
             <Body text={m.text} />
+            {m.meta && <div className="meta" dir="ltr">{m.meta}</div>}
           </div>
         ))}
         {loading && <div className="msg bot">در حال نوشتن…</div>}
       </div>
+      {debug && (
+        <select className="modelSel" value={model} onChange={(e) => setModel(e.target.value)}>
+          {MODEL_OPTIONS.map((o) => (
+            <option key={o} value={o}>{o}</option>
+          ))}
+        </select>
+      )}
       <div className="row">
         <input
           value={input}
