@@ -1,135 +1,72 @@
-"use client";
-import { useEffect, useState } from "react";
+import fs from "node:fs";
+import path from "node:path";
+import crypto from "node:crypto";
 
-type Msg = { role: "user" | "bot"; text: string; meta?: string };
+// هر فایل داخل knowledge/ یک سند است. خط‌های اول (به ترتیب دلخواه):
+//   type: app | overview | answer    ← app = آموزش وصل کردن یک اپ | پیش‌فرض answer
+//   title: تلگرام                    ← اسم اپ (فقط برای type: app)
+//   keywords: کلمه۱, کلمه۲, ...
+// platform = اسم فایل (Telegram.md → telegram)
+// برای type: app هر مرحله یک خطه:
+//   1. 🤖 | عنوان | توضیح | input=botToken | textbox=true | end=false
+const dir = "knowledge";
+const META = /^(keywords|type|title|app):\s*(.*)$/i;
+const OPT = /^(input|textbox|end)\s*=\s*(.*)$/i;
 
-// فقط با ?debug=1 دیده می‌شه: انتخاب مدل برای مقایسه‌ی سرعت و کیفیت
-const MODEL_OPTIONS = ["gemma", "llama8", "qwen", "glm", "glm53", "llama70"];
+function parseSteps(body, platform) {
+  return body
+    .split("\n")
+    .map((l) => l.match(/^\s*\d+[.)\-]\s*(.+)$/))
+    .filter(Boolean)
+    .map((m) => {
+      const parts = m[1].split("|").map((s) => s.trim());
+      const opt = {};
+      while (parts.length > 1 && OPT.test(parts[parts.length - 1])) {
+        const k = parts.pop().match(OPT);
+        opt[k[1].toLowerCase()] = k[2].trim();
+      }
+      const [icon, title, description] =
+        parts.length >= 3 ? parts : ["", parts[0] || "", parts[1] || ""];
+      return {
+        icon,
+        platform,
+        title,
+        description,
+        input: opt.input || "",
+        textbox: opt.textbox === "true",
+        end: opt.end === "true",
+      };
+    });
+}
 
-// بلوک کد (همیشه چپ‌به‌راست) با دکمه‌ی کپی
-function CodeBlock({ lang, code }: { lang: string; code: string }) {
-  const [copied, setCopied] = useState(false);
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(code);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {}
+const docs = fs.readdirSync(dir).filter((f) => f.endsWith(".md")).map((f) => {
+  const lines = fs.readFileSync(path.join(dir, f), "utf8").replace(/\r/g, "").trim().split("\n");
+  const meta = {};
+  let i = 0;
+  while (i < lines.length && META.test(lines[i])) {
+    const m = lines[i].match(META);
+    meta[m[1].toLowerCase()] = m[2].trim();
+    i++;
   }
-  return (
-    <div className="code">
-      <div className="codeHead">
-        <span>{lang || "code"}</span>
-        <button onClick={copy}>{copied ? "کپی شد" : "کپی"}</button>
-      </div>
-      <pre dir="ltr"><code>{code}</code></pre>
-    </div>
-  );
-}
+  const text = lines.slice(i).join("\n").replace(/^-{3,}\s*\n?/, "").trim();
+  const type = ["app", "overview"].includes(meta.type) ? meta.type : "answer";
+  const platform = type === "app" ? f.replace(/\.md$/, "").toLowerCase() : "";
+  return {
+    id: f,
+    type,
+    app: platform,
+    title: meta.title || platform,
+    keywords: (meta.keywords || "").split(/[,،]/).map((s) => s.trim()).filter(Boolean),
+    text,
+    steps: type === "app" ? parseSteps(text, platform) : [],
+  };
+});
 
-// متن معمولی: جهت هر پاراگراف خودکار، و `کد داخل خط` چپ‌به‌راست
-function Text({ text }: { text: string }) {
-  return (
-    <div dir="auto" className="txt">
-      {text.split(/(`[^`\n]+`)/).map((p, i) =>
-        p.length > 2 && p.startsWith("`") && p.endsWith("`") ? (
-          <code key={i} className="ic">{p.slice(1, -1)}</code>
-        ) : (
-          p
-        )
-      )}
-    </div>
-  );
-}
-
-// متن و بلوک‌های ```کد``` رو از هم جدا می‌کنه
-function Body({ text }: { text: string }) {
-  const parts = text.split("```");
-  return (
-    <>
-      {parts.map((p, i) => {
-        if (i % 2 === 1) {
-          const m = p.match(/^([\w+#-]*)\n([\s\S]*)$/);
-          const lang = m ? m[1] : "";
-          const code = (m ? m[2] : p).replace(/\n$/, "");
-          return <CodeBlock key={i} lang={lang} code={code} />;
-        }
-        const t = p.replace(/^\n+|\n+$/g, "");
-        return t ? <Text key={i} text={t} /> : null;
-      })}
-    </>
-  );
-}
-
-export default function Home() {
-  const [msgs, setMsgs] = useState<Msg[]>([]);
-  const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [debug, setDebug] = useState(false);
-  const [model, setModel] = useState("gemma");
-  useEffect(() => {
-    setDebug(new URLSearchParams(location.search).has("debug"));
-  }, []);
-
-  async function send() {
-    const text = input.trim();
-    if (!text || loading) return;
-    setMsgs((m) => [...m, { role: "user", text }]);
-    setInput("");
-    setLoading(true);
-    const t0 = Date.now();
-    try {
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(debug ? { message: text, model } : { message: text }),
-      });
-      const raw = (await res.json()) as
-        | { icon: string; title: string; description: string }[]
-        | { reply?: string; error?: string; model?: string; ms?: number; cached?: boolean };
-      const data = Array.isArray(raw)
-        ? { reply: raw.map((s, i) => `${s.icon} ${i + 1}. ${s.title}\n${s.description}`).join("\n\n") }
-        : raw;
-      const total = ((Date.now() - t0) / 1000).toFixed(1);
-      const meta = debug
-        ? `${data.model ?? "—"} · مدل: ${data.ms ? (data.ms / 1000).toFixed(1) + "s" : data.cached ? "کش" : "بدون مدل"} · کل: ${total}s`
-        : undefined;
-      setMsgs((m) => [...m, { role: "bot", text: data.reply || data.error || "خطا", meta }]);
-    } catch {
-      setMsgs((m) => [...m, { role: "bot", text: "اتصال برقرار نشد. دوباره تلاش کن." }]);
-    }
-    setLoading(false);
-  }
-
-  return (
-    <main className="wrap">
-      <h1>دستیار هوشمند</h1>
-      <div className="msgs">
-        {msgs.length === 0 && <div className="msg bot">سلام! سوالت رو بپرس.</div>}
-        {msgs.map((m, i) => (
-          <div key={i} className={`msg ${m.role}`}>
-            <Body text={m.text} />
-            {m.meta && <div className="meta" dir="ltr">{m.meta}</div>}
-          </div>
-        ))}
-        {loading && <div className="msg bot">در حال نوشتن…</div>}
-      </div>
-      {debug && (
-        <select className="modelSel" value={model} onChange={(e) => setModel(e.target.value)}>
-          {MODEL_OPTIONS.map((o) => (
-            <option key={o} value={o}>{o}</option>
-          ))}
-        </select>
-      )}
-      <div className="row">
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && send()}
-          placeholder="پیامت رو بنویس"
-        />
-        <button onClick={send} disabled={loading}>ارسال</button>
-      </div>
-    </main>
-  );
-}
+const version = crypto.createHash("md5").update(JSON.stringify(docs)).digest("hex").slice(0, 8);
+fs.writeFileSync(
+  "app/knowledge.generated.ts",
+  `export type Step = { icon: string; platform: string; title: string; description: string; input: string; textbox: boolean; end: boolean };\n` +
+    `export const VERSION = "${version}";\n` +
+    `export const DOCS: { id: string; type: string; app: string; title: string; keywords: string[]; text: string; steps: Step[] }[] = ${JSON.stringify(docs, null, 1)};\n`
+);
+console.log(docs.length + " docs built");
