@@ -1,18 +1,18 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { DOCS, VERSION } from "../../knowledge.generated";
-import { findDocs, stepsOut, type Out } from "./match";
-
-// معرفی کلی اپ (فایل‌هایی با type: overview) – برای تشخیص سوال مربوط/نامربوط
-const OVERVIEW = DOCS.filter((d) => d.type === "overview").map((d) => d.text).join("\n");
+import { mentionedApps, findDocs, appsOut, type Out } from "./match";
 
 const MODEL = "@cf/google/gemma-4-26b-a4b-it"; // مدل قوی (تنها مدل)
-const MAX_TOKENS = 500; // جواب‌ها کوتاه و ساده‌ان
 const TEMPERATURE = 0.2; // کم = وفادارتر به متن آموزش‌ها
+const MAX_TOKENS_ANSWER = 500; // سوال‌های معمولی (جواب کوتاه)
 const CACHE_TTL = 86400; // یک روز
-const PROMPT_VERSION = "3"; // با عوض کردنش، جواب‌های قدیمیِ کش‌شده نادیده گرفته می‌شن
+const PROMPT_VERSION = "5"; // با عوض کردنش، جواب‌های قدیمیِ کش‌شده نادیده گرفته می‌شن
 
 const OFFTOPIC =
   "من فقط درباره‌ی اپ Orbix AI کمکت می‌کنم 🙂 مثلاً وصل کردن تلگرام یا بله، پخش موزیک و تنظیمات.";
+
+// معرفی کلی اپ (فایل‌هایی با type: overview) – برای تشخیص سوال مربوط/نامربوط
+const OVERVIEW = DOCS.filter((d) => d.type === "overview").map((d) => d.text).join("\n");
 
 // CORS: بدون این هدرها مرورگر جواب این پروژه رو برای فرانت (دامنه‌ی دیگه) بلاک می‌کنه
 const CORS_HEADERS = {
@@ -65,25 +65,42 @@ export async function POST(req: Request) {
     const message = (body.message ?? "").trim().slice(0, 1000);
     if (!message) return reply({ error: "پیام خالیه" }, 400);
 
-    const docs = findDocs(DOCS, message);
-
-    // ۱) آموزش مرحله‌ای (مثل وصل کردن تلگرام): بدون مدل، مستقیم از فایل آموزش، رایگان و سریع
-    if (docs[0] && docs[0].type === "steps" && docs[0].steps.length) {
-      return reply(stepsOut(docs[0]));
-    }
+    // ۱) اپ تو سوال هست (یکی یا چندتا): مراحل فایل همون اپ‌ها پشت‌هم، بدون مدل
+    //    تعداد مراحل از خود فایل‌ها میاد (تلگرام ۵، بله ۶ → تلگرام به بله = ۱۱ مرحله)
+    const apps = mentionedApps(DOCS, message);
+    if (apps.length >= 1) return reply(appsOut(apps));
 
     const { env } = getCloudflareContext();
     const e = env as unknown as { AI: AiBinding; CACHE?: KvBinding };
 
-    // ۲) نه سندی پیدا شد و نه معرفی کلی اپ داریم → سوال نامربوطه، بدون مدل
-    const info = docs.length ? docs.map((d) => d.text).join("\n---\n") : OVERVIEW;
-    if (!info) return reply({ type: "offtopic", reply: OFFTOPIC } satisfies Out);
+    const ask = async (system: string, maxTokens: number) => {
+      const result = await e.AI.run(MODEL, {
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: message },
+        ],
+        max_tokens: maxTokens,
+        temperature: TEMPERATURE,
+        // طبق مستندات Workers AI: Gemma 4 پیش‌فرض اول "فکر" می‌کنه؛ برای جواب از روی آموزش‌ها لازم نیست
+        chat_template_kwargs: { enable_thinking: false },
+      });
+      return { text: extractText(result), result };
+    };
 
     const key = "chat:" + (await hash(MODEL + "|" + PROMPT_VERSION + "|" + VERSION + "|" + message.toLowerCase()));
     if (e.CACHE) {
       const hit = await e.CACHE.get(key);
       if (hit) return reply({ ...(JSON.parse(hit) as Out), cached: true });
     }
+    const save = async (out: Out) => {
+      if (e.CACHE) await e.CACHE.put(key, JSON.stringify(out), { expirationTtl: CACHE_TTL });
+      return reply(out);
+    };
+
+    // ۲) هیچ اپی تو سوال نیست: سند مرتبط (مثلا موزیک) یا معرفی کلی اپ؛ بیرون از این‌ها = سوال نامربوط
+    const docs = findDocs(DOCS, message);
+    const info = docs.length ? docs.map((d) => d.text).join("\n---\n") : OVERVIEW;
+    if (!info) return reply({ type: "offtopic", reply: OFFTOPIC } satisfies Out);
 
     const system =
       "You are the help assistant inside the Orbix AI app. Answer ONLY using the app info below. " +
@@ -94,30 +111,13 @@ export async function POST(req: Request) {
       "(example: ⚙️ تنظیمات ← 🎵 موزیک ← 🎶 آهنگ). No markdown bold, no headings, no long intro.\n\nAPP INFO:\n" +
       info;
 
-    const result = await e.AI.run(MODEL, {
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: message },
-      ],
-      max_tokens: MAX_TOKENS,
-      temperature: TEMPERATURE,
-      // طبق مستندات Workers AI: Gemma 4 پیش‌فرض اول "فکر" می‌کنه؛ برای جواب از روی آموزش‌ها لازم نیست
-      chat_template_kwargs: { enable_thinking: false },
-    });
-
-    const text = extractText(result);
+    const { text, result } = await ask(system, MAX_TOKENS_ANSWER);
     if (!text) {
       const keys = result && typeof result === "object" ? Object.keys(result).join(",") : typeof result;
       const finish = result?.choices?.[0]?.finish_reason ?? "";
       return reply({ error: "مدل جواب خالی داد (" + keys + (finish ? " / " + finish : "") + ")" }, 502);
     }
-
-    const out: Out = text.includes("NO_ANSWER")
-      ? { type: "offtopic", reply: OFFTOPIC }
-      : { type: "answer", reply: text };
-
-    if (e.CACHE) await e.CACHE.put(key, JSON.stringify(out), { expirationTtl: CACHE_TTL });
-    return reply(out);
+    return save(text.includes("NO_ANSWER") ? { type: "offtopic", reply: OFFTOPIC } : { type: "answer", reply: text });
   } catch (err) {
     return reply({ error: "خطا: " + String(err) }, 500);
   }
