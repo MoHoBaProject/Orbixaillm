@@ -22,3 +22,5 @@ input { flex: 1; padding: 12px; border-radius: 10px; border: 1px solid #2c3b4a; 
 input:focus-visible, button:focus-visible { outline: 2px solid #4fd1b0; }
 button { padding: 0 20px; border: 0; border-radius: 10px; background: #4fd1b0; color: #06201a; font-size: 16px; cursor: pointer; }
 button:disabled { opacity: .5; cursor: default; }
+.meta { margin-top: 6px; font-size: 11px; opacity: .6; }
+.modelSel { margin-top: 6px; padding: 8px; border-radius: 8px; border: 1px solid #2c3b4a; background: #16212c; color: inherit; font-size: 14px; }
