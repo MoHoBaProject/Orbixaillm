@@ -84,7 +84,12 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(debug ? { message: text, model } : { message: text }),
       });
-      const data = (await res.json()) as { reply?: string; error?: string; model?: string; ms?: number; cached?: boolean };
+      const raw = (await res.json()) as
+        | { icon: string; title: string; description: string }[]
+        | { reply?: string; error?: string; model?: string; ms?: number; cached?: boolean };
+      const data = Array.isArray(raw)
+        ? { reply: raw.map((s, i) => `${s.icon} ${i + 1}. ${s.title}\n${s.description}`).join("\n\n") }
+        : raw;
       const total = ((Date.now() - t0) / 1000).toFixed(1);
       const meta = debug
         ? `${data.model ?? "—"} · مدل: ${data.ms ? (data.ms / 1000).toFixed(1) + "s" : data.cached ? "کش" : "بدون مدل"} · کل: ${total}s`
