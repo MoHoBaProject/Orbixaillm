@@ -2,11 +2,20 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { DOCS, VERSION } from "../../knowledge.generated";
 import { mentionedApps, findDocs, appsOut, type Out } from "./match";
 
-const MODEL = "@cf/google/gemma-4-26b-a4b-it"; // مدل قوی (تنها مدل)
+// مدل‌های قابل انتخاب. پیش‌فرض همون gemma. بقیه فقط برای مقایسه‌ی سرعت/کیفیت‌ان (با فرستادن "model" تو درخواست، یا صفحه‌ی چت با ?debug=1)
+const MODELS: Record<string, string> = {
+  gemma: "@cf/google/gemma-4-26b-a4b-it", // فعلی: خوب تو فارسی
+  llama8: "@cf/meta/llama-3.1-8b-instruct-fast", // خیلی سریع؛ فارسی‌ش ضعیف‌تره
+  qwen: "@cf/qwen/qwen3-30b-a3b-fp8", // MoE سبک؛ معمولا سریع
+  glm: "@cf/zai-org/glm-4.7-flash", // نسخه‌ی flash
+  glm53: "@cf/zai-org/glm-5.3-flash", // نسخه‌ی جدیدتر flash
+  llama70: "@cf/meta/llama-3.3-70b-instruct-fp8-fast", // قوی‌تر ولی سنگین‌تر
+};
+const DEFAULT_MODEL = "gemma";
 const TEMPERATURE = 0.2; // کم = وفادارتر به متن آموزش‌ها
 const MAX_TOKENS_ANSWER = 500; // سوال‌های معمولی (جواب کوتاه)
 const CACHE_TTL = 86400; // یک روز
-const PROMPT_VERSION = "5"; // با عوض کردنش، جواب‌های قدیمیِ کش‌شده نادیده گرفته می‌شن
+const PROMPT_VERSION = "6"; // با عوض کردنش، جواب‌های قدیمیِ کش‌شده نادیده گرفته می‌شن
 
 const OFFTOPIC =
   "من فقط درباره‌ی اپ Orbix AI کمکت می‌کنم 🙂 مثلاً وصل کردن تلگرام یا بله، پخش موزیک و تنظیمات.";
@@ -61,7 +70,9 @@ export async function OPTIONS() {
 
 export async function POST(req: Request) {
   try {
-    const body = (await req.json()) as { message?: string };
+    const body = (await req.json()) as { message?: string; model?: string };
+    const modelName = body.model && MODELS[body.model] ? body.model : DEFAULT_MODEL;
+    const model = MODELS[modelName];
     const message = (body.message ?? "").trim().slice(0, 1000);
     if (!message) return reply({ error: "پیام خالیه" }, 400);
 
@@ -73,28 +84,38 @@ export async function POST(req: Request) {
     const { env } = getCloudflareContext();
     const e = env as unknown as { AI: AiBinding; CACHE?: KvBinding };
 
+    let ms = 0; // زمان صرف‌شده برای مدل (میلی‌ثانیه)
     const ask = async (system: string, maxTokens: number) => {
-      const result = await e.AI.run(MODEL, {
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: message },
-        ],
-        max_tokens: maxTokens,
-        temperature: TEMPERATURE,
-        // طبق مستندات Workers AI: Gemma 4 پیش‌فرض اول "فکر" می‌کنه؛ برای جواب از روی آموزش‌ها لازم نیست
-        chat_template_kwargs: { enable_thinking: false },
-      });
+      const t0 = Date.now();
+      const run = (extra: object) =>
+        e.AI.run(model, {
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content: message },
+          ],
+          max_tokens: maxTokens,
+          temperature: TEMPERATURE,
+          ...extra,
+        });
+      let result: any;
+      try {
+        // فکر کردن خاموش (طبق مستندات Workers AI، Gemma 4 پیش‌فرض اول "فکر" می‌کنه؛ برای جواب از روی آموزش‌ها لازم نیست)
+        result = await run({ chat_template_kwargs: { enable_thinking: false } });
+      } catch {
+        result = await run({}); // بعضی مدل‌ها این پارامتر رو قبول نمی‌کنن
+      }
+      ms = Date.now() - t0;
       return { text: extractText(result), result };
     };
 
-    const key = "chat:" + (await hash(MODEL + "|" + PROMPT_VERSION + "|" + VERSION + "|" + message.toLowerCase()));
+    const key = "chat:" + (await hash(model + "|" + PROMPT_VERSION + "|" + VERSION + "|" + message.toLowerCase()));
     if (e.CACHE) {
       const hit = await e.CACHE.get(key);
       if (hit) return reply({ ...(JSON.parse(hit) as Out), cached: true });
     }
     const save = async (out: Out) => {
       if (e.CACHE) await e.CACHE.put(key, JSON.stringify(out), { expirationTtl: CACHE_TTL });
-      return reply(out);
+      return reply({ ...out, model: modelName, ms });
     };
 
     // ۲) هیچ اپی تو سوال نیست: سند مرتبط (مثلا موزیک) یا معرفی کلی اپ؛ بیرون از این‌ها = سوال نامربوط
