@@ -15,10 +15,8 @@ function findDocs(msg: string) {
     .join("\n---\n");
 }
 
-// مدل سبک برای سوال‌های کوتاه، مدل قوی‌تر برای بقیه
-const MODEL_LIGHT = "@cf/meta/llama-3.1-8b-instruct-fp8";
+// فقط مدل قوی
 const MODEL_MAIN = "@cf/google/gemma-4-26b-a4b-it";
-const SHORT_LIMIT = 40; // طول پیام (کاراکتر) برای انتخاب مدل سبک
 const MAX_TOKENS = 256;
 const CACHE_TTL = 86400; // یک روز
 
@@ -59,7 +57,7 @@ export async function POST(req: Request) {
     const { env } = getCloudflareContext();
     const e = env as unknown as { AI: AiBinding; CACHE?: KvBinding };
 
-    const model = message.length <= SHORT_LIMIT ? MODEL_LIGHT : MODEL_MAIN;
+    const model = MODEL_MAIN;
     const context = findDocs(message);
     const key = "chat:" + (await hash(model + "|" + VERSION + "|" + message.toLowerCase()));
 
