@@ -17,7 +17,7 @@ function findDocs(msg: string) {
 
 // فقط مدل قوی
 const MODEL_MAIN = "@cf/google/gemma-4-26b-a4b-it";
-const MAX_TOKENS = 256;
+const MAX_TOKENS = 1024; // مدل‌های قوی اول فکر می‌کنن و بعد جواب می‌دن؛ ۲۵۶ کم بود و جواب خالی می‌شد
 const CACHE_TTL = 86400; // یک روز
 
 // CORS: بدون این هدرها مرورگر جواب این پروژه رو برای فرانت (دامنه‌ی دیگه) بلاک می‌کنه
@@ -41,6 +41,23 @@ type KvBinding = {
 async function hash(text: string) {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+// متن جواب رو از شکل‌های مختلف خروجی Workers AI درمیاره
+function extractText(r: any): string {
+  const pick = (v: any): string => {
+    if (typeof v === "string") return v.trim();
+    if (Array.isArray(v)) return v.map((p) => (typeof p === "string" ? p : p?.text ?? "")).join("").trim();
+    return "";
+  };
+  return (
+    pick(r?.response) ||
+    pick(r?.choices?.[0]?.message?.content) ||
+    pick(r?.choices?.[0]?.text) ||
+    pick(r?.output_text) ||
+    pick(r?.result?.response) ||
+    ""
+  );
 }
 
 // درخواست preflight مرورگر
@@ -80,7 +97,14 @@ export async function POST(req: Request) {
       max_tokens: MAX_TOKENS,
     });
 
-    const text = result?.response ?? result?.choices?.[0]?.message?.content ?? "";
+    const text = extractText(result);
+
+    // جواب خالی رو به کاربر نشون نده و کش هم نکن؛ به‌جاش دلیلش رو برگردون
+    if (!text) {
+      const info = result && typeof result === "object" ? Object.keys(result).join(",") : typeof result;
+      const finish = result?.choices?.[0]?.finish_reason ?? "";
+      return reply({ error: "مدل جواب خالی داد (" + info + (finish ? " / " + finish : "") + ")" }, 502);
+    }
 
     if (e.CACHE && text) {
       await e.CACHE.put(key, text, { expirationTtl: CACHE_TTL });
