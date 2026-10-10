@@ -1,46 +1,48 @@
-// منطق خالصِ پیدا کردن سند و ساخت جواب مرحله‌ای (بدون وابستگی، تا بشه توی تست‌ها بدون Cloudflare اجراش کرد)
+// منطق خالصِ تشخیص اپ‌ها، پیدا کردن سند و ساخت جواب مرحله‌ای (بدون وابستگی، تا بشه بدون Cloudflare تست کرد)
 
-export type Step = { icon: string; title: string; text: string; input?: string; app?: string };
-export type Doc = {
-  id: string; type: string; title: string; keywords: string[];
-  requires: string[][]; excludes: string[]; text: string; steps: Step[];
-};
+export type Step = { icon: string; title: string; text: string; app: string; input?: string };
+export type Doc = { id: string; type: string; app: string; title: string; keywords: string[]; text: string; steps: Step[] };
 
 // شکل جواب برای فرانت:
-//  type "steps"    → { title, steps:[{icon,title,text,app?,input?}], reply } (reply = همون مراحل به‌صورت متن ساده)
+//  type "steps"    → { title, apps, steps:[{icon,title,text,app,input?}], reply }  (reply = همون مراحل به‌صورت متن ساده)
 //  type "answer"   → { reply }
 //  type "offtopic" → { reply }
+// تعداد مراحل کاملاً پویاست: جمع مرحله‌های فایل اپ‌هایی که کاربر اسم برده (فرانت به تعداد steps اسلاید می‌سازه)
 export type Out =
-  | { type: "steps"; title: string; steps: Step[]; reply: string }
+  | { type: "steps"; title: string; apps: string[]; steps: Step[]; reply: string }
   | { type: "answer" | "offtopic"; reply: string };
 
 export const norm = (s: string) =>
   s.toLowerCase().replace(/ي/g, "ی").replace(/ك/g, "ک").replace(/\u200c/g, " ");
 
-// امتیاز یک سند برای این پیام (۰ = نامرتبط)
-function score(d: Doc, m: string): number {
-  const has = (w: string) => m.includes(norm(w));
-  if (d.excludes.some(has)) return 0; // کلمه‌ی ممنوعه تو پیام بود
-  if (d.requires.length && !d.requires.every((g) => g.some(has))) return 0; // همه‌ی گروه‌های لازم باید باشن
-  const hits = d.keywords.filter(has).length;
-  // سندی که requires داره دقیق‌تره (مثلا هم تلگرام هم بله)، پس بر سندهای عمومی‌تر می‌چربه
-  return hits ? hits + (d.requires.length ? 100 : 0) : 0;
+// اپ‌هایی که تو پیام اسمشون اومده، به ترتیب اولین جایی که تو جمله آمدن
+export function mentionedApps(docs: Doc[], msg: string): Doc[] {
+  const m = norm(msg);
+  return docs
+    .filter((d) => d.type === "app")
+    .map((d) => ({ d, pos: Math.min(...d.keywords.map((k) => m.indexOf(norm(k))).filter((i) => i >= 0), Infinity) }))
+    .filter((x) => x.pos !== Infinity)
+    .sort((a, b) => a.pos - b.pos)
+    .map((x) => x.d);
 }
 
-// سندهای مرتبط با پیام (حداکثر ۲ تا). اگه امتیاز برابر بود، سند مرحله‌ای (steps) جلوتره
+// سندهای معمولی (غیر اپ و غیر معرفی) که کلمه کلیدیشون تو پیام هست؛ حداکثر ۲ تا
 export function findDocs(docs: Doc[], msg: string): Doc[] {
   const m = norm(msg);
   return docs
-    .filter((d) => d.type !== "overview")
-    .map((d) => ({ d, s: score(d, m) }))
+    .filter((d) => d.type === "answer")
+    .map((d) => ({ d, s: d.keywords.filter((k) => m.includes(norm(k))).length }))
     .filter((x) => x.s > 0)
-    .sort((a, b) => b.s - a.s || Number(b.d.type === "steps") - Number(a.d.type === "steps"))
+    .sort((a, b) => b.s - a.s)
     .slice(0, 2)
     .map((x) => x.d);
 }
 
-export function stepsOut(d: Doc): Out {
-  const plain =
-    d.title + "\n\n" + d.steps.map((s, i) => `${s.icon} ${i + 1}. ${s.title}\n${s.text}`).join("\n\n");
-  return { type: "steps", title: d.title, steps: d.steps, reply: plain };
+// مراحل همه‌ی اپ‌های خواسته‌شده، پشت‌هم و به ترتیب جمله (یک اپ = مراحل همون اپ، دو اپ = جمع مراحل هر دو، ...)
+export function appsOut(apps: Doc[]): Out {
+  const steps = apps.flatMap((d) => d.steps);
+  const title = "اتصال " + apps.map((d) => d.title).join(" و ");
+  const reply =
+    title + "\n\n" + steps.map((s, i) => `${s.icon} ${i + 1}. ${s.title}\n${s.text}`).join("\n\n");
+  return { type: "steps", title, apps: apps.map((d) => d.app), steps, reply };
 }
