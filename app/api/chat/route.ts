@@ -17,7 +17,7 @@ function findDocs(msg: string) {
 
 // فقط مدل قوی
 const MODEL_MAIN = "@cf/google/gemma-4-26b-a4b-it";
-const MAX_TOKENS = 1024; // مدل‌های قوی اول فکر می‌کنن و بعد جواب می‌دن؛ ۲۵۶ کم بود و جواب خالی می‌شد
+const MAX_TOKENS = 1500; // سقف طول جواب (کد و توضیح بلند جا بشه)
 const CACHE_TTL = 86400; // یک روز
 
 // CORS: بدون این هدرها مرورگر جواب این پروژه رو برای فرانت (دامنه‌ی دیگه) بلاک می‌کنه
@@ -95,6 +95,9 @@ export async function POST(req: Request) {
         { role: "user", content: message },
       ],
       max_tokens: MAX_TOKENS,
+      // مدل Gemma 4 به‌صورت پیش‌فرض اول "فکر" می‌کنه و همه‌ی توکن‌ها صرف همین می‌شه (جواب خالی)؛
+      // با خاموش کردنش مستقیم جواب می‌ده (طبق مستندات Workers AI)
+      chat_template_kwargs: { enable_thinking: false },
     });
 
     const text = extractText(result);
