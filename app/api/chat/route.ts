@@ -1,21 +1,6 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
-import { DOCS, VERSION, type Step } from "../../knowledge.generated";
-
-type Doc = (typeof DOCS)[number];
-
-const norm = (s: string) =>
-  s.toLowerCase().replace(/ي/g, "ی").replace(/ك/g, "ک").replace(/\u200c/g, " ");
-
-// سندهایی که کلمه کلیدیشون تو پیام هست (حداکثر ۲ تا). اگه امتیاز برابر بود، سند مرحله‌ای (steps) جلوتره
-function findDocs(msg: string): Doc[] {
-  const m = norm(msg);
-  return DOCS.filter((d) => d.type !== "overview")
-    .map((d) => ({ d, s: d.keywords.filter((k) => m.includes(norm(k))).length }))
-    .filter((x) => x.s > 0)
-    .sort((a, b) => b.s - a.s || Number(b.d.type === "steps") - Number(a.d.type === "steps"))
-    .slice(0, 2)
-    .map((x) => x.d);
-}
+import { DOCS, VERSION } from "../../knowledge.generated";
+import { findDocs, stepsOut, type Out } from "./match";
 
 // معرفی کلی اپ (فایل‌هایی با type: overview) – برای تشخیص سوال مربوط/نامربوط
 const OVERVIEW = DOCS.filter((d) => d.type === "overview").map((d) => d.text).join("\n");
@@ -36,14 +21,6 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Headers": "Content-Type",
   "Access-Control-Max-Age": "86400",
 };
-
-// شکل جواب برای فرانت:
-//  type "steps"    → { title, steps:[{icon,title,text,input?}], reply } (reply = همون مراحل به‌صورت متن ساده)
-//  type "answer"   → { reply }
-//  type "offtopic" → { reply }
-type Out =
-  | { type: "steps"; title: string; steps: Step[]; reply: string }
-  | { type: "answer" | "offtopic"; reply: string };
 
 function reply(body: unknown, status = 200) {
   return Response.json(body, { status, headers: CORS_HEADERS });
@@ -77,12 +54,6 @@ function extractText(r: any): string {
   );
 }
 
-function stepsOut(d: Doc): Out {
-  const plain =
-    d.title + "\n\n" + d.steps.map((s, i) => `${s.icon} ${i + 1}. ${s.title}\n${s.text}`).join("\n\n");
-  return { type: "steps", title: d.title, steps: d.steps, reply: plain };
-}
-
 // درخواست preflight مرورگر
 export async function OPTIONS() {
   return new Response(null, { status: 204, headers: CORS_HEADERS });
@@ -94,7 +65,7 @@ export async function POST(req: Request) {
     const message = (body.message ?? "").trim().slice(0, 1000);
     if (!message) return reply({ error: "پیام خالیه" }, 400);
 
-    const docs = findDocs(message);
+    const docs = findDocs(DOCS, message);
 
     // ۱) آموزش مرحله‌ای (مثل وصل کردن تلگرام): بدون مدل، مستقیم از فایل آموزش، رایگان و سریع
     if (docs[0] && docs[0].type === "steps" && docs[0].steps.length) {
