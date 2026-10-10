@@ -1,6 +1,6 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { DOCS, VERSION } from "../../knowledge.generated";
-import { mentionedApps, findDocs, appsOut, type Out } from "./match";
+import { mentionedApps, findDocs, appsOut, type TextOut } from "./match";
 
 // مدل‌های قابل انتخاب. پیش‌فرض همون gemma. بقیه فقط برای مقایسه‌ی سرعت/کیفیت‌ان (با فرستادن "model" تو درخواست، یا صفحه‌ی چت با ?debug=1)
 const MODELS: Record<string, string> = {
@@ -76,8 +76,8 @@ export async function POST(req: Request) {
     const message = (body.message ?? "").trim().slice(0, 1000);
     if (!message) return reply({ error: "پیام خالیه" }, 400);
 
-    // ۱) اپ تو سوال هست (یکی یا چندتا): مراحل فایل همون اپ‌ها پشت‌هم، بدون مدل
-    //    تعداد مراحل از خود فایل‌ها میاد (تلگرام ۵، بله ۶ → تلگرام به بله = ۱۱ مرحله)
+    // ۱) اپ تو سوال هست (یکی یا چندتا): آرایه‌ی مراحل فایل همون اپ‌ها پشت‌هم، بدون مدل
+    //    خروجی: [{ icon, platform, title, description, input, textbox, end }, ...]
     const apps = mentionedApps(DOCS, message);
     if (apps.length >= 1) return reply(appsOut(apps));
 
@@ -111,9 +111,9 @@ export async function POST(req: Request) {
     const key = "chat:" + (await hash(model + "|" + PROMPT_VERSION + "|" + VERSION + "|" + message.toLowerCase()));
     if (e.CACHE) {
       const hit = await e.CACHE.get(key);
-      if (hit) return reply({ ...(JSON.parse(hit) as Out), cached: true });
+      if (hit) return reply({ ...(JSON.parse(hit) as TextOut), cached: true });
     }
-    const save = async (out: Out) => {
+    const save = async (out: TextOut) => {
       if (e.CACHE) await e.CACHE.put(key, JSON.stringify(out), { expirationTtl: CACHE_TTL });
       return reply({ ...out, model: modelName, ms });
     };
@@ -121,7 +121,7 @@ export async function POST(req: Request) {
     // ۲) هیچ اپی تو سوال نیست: سند مرتبط (مثلا موزیک) یا معرفی کلی اپ؛ بیرون از این‌ها = سوال نامربوط
     const docs = findDocs(DOCS, message);
     const info = docs.length ? docs.map((d) => d.text).join("\n---\n") : OVERVIEW;
-    if (!info) return reply({ type: "offtopic", reply: OFFTOPIC } satisfies Out);
+    if (!info) return reply({ type: "offtopic", reply: OFFTOPIC } satisfies TextOut);
 
     const system =
       "You are the help assistant inside the Orbix AI app. Answer ONLY using the app info below. " +
