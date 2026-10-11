@@ -1,8 +1,9 @@
 type: app
-title: بله
+title: Bale
 keywords: به بله, تو بله, توی بله, کانال بله, ربات بله, بات بله, بله رو, از بله, و بله, bale
-1. 🤖 | ساخت ربات و گرفتن توکن | در بله ربات BotFather رو باز کن، یک ربات جدید بساز و توکنی که بهت میده رو کپی کن. | input=botToken | textbox=true | end=false
-2. 📣 | ساخت کانال و گرفتن آیدی | در بله یک کانال بساز و براش یوزرنیم بذار. آیدی کانال همون @یوزرنیم کانال هست. | input=channel | textbox=true | end=false
-3. ▶️ | استارت کردن ربات | ربات خودت رو توی بله پیدا کن و Start رو بزن. | textbox=false | end=false
-4. ➕ | اضافه کردن ربات به کانال | داخل کانال بله ربات رو به‌عنوان عضو/ادمین اضافه کن. | textbox=false | end=false
-5. ✅ | ادمین کردن ربات | ربات رو ادمین کن و دسترسی ارسال پیام رو براش روشن کن. | textbox=false | end=true
+
+1. 🤖 | Create a bot and get the token | In Bale, open BotFather, create a new bot, then copy the token it gives you. | input=botToken | textbox=true | end=false
+2. 📣 | Create a channel and get its ID | Create a channel in Bale and set a username for it. The channel ID is the channel's @username. | input=channel | textbox=true | end=false
+3. ▶️ | Start the bot | Find your bot in Bale and tap Start. | textbox=false | end=false
+4. ➕ | Add the bot to the channel | Inside the Bale channel, add the bot as a member/admin. | textbox=false | end=false
+5. ✅ | Make the bot an admin | Make the bot an admin and turn on the permission to send messages. | textbox=false | end=true
